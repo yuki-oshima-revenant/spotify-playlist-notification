@@ -1,0 +1,20 @@
+[package]
+name = "spotify-playlist-notification-backend"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+tokio = { version = "1.47.1", features = ["full"] }
+serde = "1.0.219"
+serde_json = "1.0.143"
+base64 = "0.22.1"
+aws-config = { version = "1.1.7", features = ["behavior-version-latest"] }
+aws-sdk-dynamodb = "1.92.0"
+
+[dependencies.reqwest]
+version = "0.12.23"
+default-features = false
+features = ["json", "rustls-tls"]
+
+[dev-dependencies]
+dotenvy = "0.15.7"
