@@ -4,6 +4,7 @@ import {
     aws_iam,
     aws_scheduler,
     aws_scheduler_targets,
+    Duration,
     Stack,
     TimeZone,
     type StackProps,
@@ -27,10 +28,12 @@ export class CdkStack extends Stack {
                 "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
         });
 
+        // todo: secrets managerから環境変数を取得できるようにする
         const lambda = new RustFunction(this, "Lambda", {
             role,
-            manifestPath: join(__dirname, "..", "backend"),
+            manifestPath: join(__dirname, "..", "..", "backend"),
             architecture: Architecture.ARM_64,
+            timeout: Duration.minutes(5),
         });
 
         const userTable = new aws_dynamodb.TableV2(this, "UserTable", {

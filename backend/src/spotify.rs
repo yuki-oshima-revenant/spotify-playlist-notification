@@ -25,6 +25,12 @@ pub struct SpotifyExternalUrls {
 }
 
 #[derive(Deserialize, Debug)]
+pub struct SpotifyPlaylistResponse {
+    pub name: String,
+    pub external_urls: SpotifyExternalUrls,
+}
+
+#[derive(Deserialize, Debug)]
 pub struct SpotifyTrack {
     pub id: String,
     name: String,
@@ -41,7 +47,7 @@ pub struct SpotifyPlaylistItem {
 #[derive(Deserialize, Debug)]
 pub struct SpotifyPlaylistTracksResponse {
     next: Option<String>,
-    items: Vec<SpotifyPlaylistItem>,
+    pub items: Vec<SpotifyPlaylistItem>,
 }
 
 impl SpotifyPlaylistTracksResponse {
@@ -96,6 +102,21 @@ impl SpotifyClient {
     pub async fn init(refresh_token: &str) -> Result<Self, OpaqueError> {
         let token_response = Self::refresh_spotify_access_token(refresh_token).await?;
         Ok(Self { token_response })
+    }
+
+    pub async fn get_spotify_playlist(
+        &self,
+        playlist_id: &str,
+    ) -> Result<SpotifyPlaylistResponse, OpaqueError> {
+        let client = reqwest::Client::new();
+        let url = format!("https://api.spotify.com/v1/playlists/{playlist_id}");
+        let res = client
+            .get(url)
+            .bearer_auth(&self.get_access_token())
+            .send()
+            .await?;
+        let res_body: SpotifyPlaylistResponse = res.json().await?;
+        Ok(res_body)
     }
 
     pub async fn get_spotify_playlist_tracks(
@@ -154,6 +175,21 @@ mod tests {
     use crate::dynamodb::DynamoDBClient;
 
     use super::*;
+
+    #[tokio::test]
+    async fn test_get_spotify_playlist() {
+        dotenvy::dotenv().ok();
+        let playlist_id = env::var("SPOTIFY_PLAYLIST_ID").unwrap();
+        let dynamodb_client = DynamoDBClient::new().await;
+        let spotify_refresh_token = dynamodb_client
+            .extract_spotify_refresh_token()
+            .await
+            .unwrap()
+            .unwrap();
+        let client = SpotifyClient::init(&spotify_refresh_token).await.unwrap();
+        let res = client.get_spotify_playlist(&playlist_id).await.unwrap();
+        println!("{:?}", res);
+    }
 
     #[tokio::test]
     async fn test_get_spotify_playlist_tracks() {
