@@ -1,11 +1,36 @@
-import { aws_dynamodb, aws_iam, Stack, StackProps } from "aws-cdk-lib";
-import { Construct } from "constructs";
+import { join } from "path";
+import {
+    aws_dynamodb,
+    aws_iam,
+    aws_scheduler,
+    aws_scheduler_targets,
+    Stack,
+    TimeZone,
+    type StackProps,
+} from "aws-cdk-lib";
+import { ServicePrincipal } from "aws-cdk-lib/aws-iam";
+import type { Construct } from "constructs";
+import { RustFunction } from "cargo-lambda-cdk";
+import { Architecture } from "aws-cdk-lib/aws-lambda";
 
 export class CdkStack extends Stack {
     constructor(scope: Construct, id: string, props?: StackProps) {
         super(scope, id, props);
         const localTestUser = new aws_iam.User(this, "LocalTestUser", {
             userName: "spotify-playlist-notification-local-test",
+        });
+        const role = new aws_iam.Role(this, "LambdaRole", {
+            assumedBy: new ServicePrincipal("lambda.amazonaws.com"),
+        });
+        role.addManagedPolicy({
+            managedPolicyArn:
+                "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+        });
+
+        const lambda = new RustFunction(this, "Lambda", {
+            role,
+            manifestPath: join(__dirname, "..", "backend"),
+            architecture: Architecture.ARM_64,
         });
 
         const userTable = new aws_dynamodb.TableV2(this, "UserTable", {
@@ -20,6 +45,7 @@ export class CdkStack extends Stack {
             },
         });
         userTable.grantReadData(localTestUser);
+        userTable.grantReadData(lambda);
 
         const spotifyRefreshTokenTable = new aws_dynamodb.TableV2(
             this,
@@ -35,6 +61,8 @@ export class CdkStack extends Stack {
         );
         spotifyRefreshTokenTable.grantReadData(localTestUser);
         spotifyRefreshTokenTable.grantWriteData(localTestUser);
+        spotifyRefreshTokenTable.grantReadData(lambda);
+        spotifyRefreshTokenTable.grantWriteData(lambda);
 
         const lastNotifiedTrackTable = new aws_dynamodb.TableV2(
             this,
@@ -49,5 +77,19 @@ export class CdkStack extends Stack {
         );
         lastNotifiedTrackTable.grantReadData(localTestUser);
         lastNotifiedTrackTable.grantWriteData(localTestUser);
+        lastNotifiedTrackTable.grantReadData(lambda);
+        lastNotifiedTrackTable.grantWriteData(lambda);
+
+        new aws_scheduler.Schedule(this, "Schedule", {
+            schedule: aws_scheduler.ScheduleExpression.cron({
+                minute: "0",
+                hour: "0,12",
+                day: "*",
+                month: "*",
+                year: "*",
+                timeZone: TimeZone.ASIA_TOKYO,
+            }),
+            target: new aws_scheduler_targets.LambdaInvoke(lambda),
+        });
     }
 }
