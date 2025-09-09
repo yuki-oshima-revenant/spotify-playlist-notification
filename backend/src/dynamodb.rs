@@ -1,4 +1,5 @@
 use aws_sdk_dynamodb::types::AttributeValue;
+use mockall::automock;
 
 use crate::{
     OpaqueError,
@@ -10,6 +11,18 @@ const LAST_NOTIFIED_TRACK_TABLE_NAME: &str = "spotify-playlist-notification_last
 const SPOTIFY_REFRESH_TOKEN_TABLE_NAME: &str =
     "spotify-playlist-notification_spotify_refresh_token";
 
+#[automock]
+pub trait DynamoDBClientTrait {
+    async fn extract_user_master(&self) -> Result<UserMaster, OpaqueError>;
+    async fn extract_last_notified_track_id(&self) -> Result<Option<String>, OpaqueError>;
+    async fn update_last_notified_track_id(&self, new_track_id: &str) -> Result<(), OpaqueError>;
+    async fn extract_spotify_refresh_token(&self) -> Result<Option<String>, OpaqueError>;
+    async fn update_spotify_refresh_token(
+        &self,
+        new_refresh_token: &str,
+    ) -> Result<(), OpaqueError>;
+}
+
 pub struct DynamoDBClient {
     client: aws_sdk_dynamodb::Client,
 }
@@ -20,8 +33,10 @@ impl DynamoDBClient {
         let client = aws_sdk_dynamodb::Client::new(&config);
         DynamoDBClient { client }
     }
+}
 
-    pub async fn extract_user_master(&self) -> Result<UserMaster, OpaqueError> {
+impl DynamoDBClientTrait for DynamoDBClient {
+    async fn extract_user_master(&self) -> Result<UserMaster, OpaqueError> {
         let mut users = Vec::new();
         let request = self.client.scan().table_name(USER_TABLE_NAME);
         let response = request.send().await?;
@@ -59,7 +74,7 @@ impl DynamoDBClient {
         Ok(UserMaster { users })
     }
 
-    pub async fn extract_last_notified_track_id(&self) -> Result<Option<String>, OpaqueError> {
+    async fn extract_last_notified_track_id(&self) -> Result<Option<String>, OpaqueError> {
         let request = self
             .client
             .get_item()
@@ -81,10 +96,7 @@ impl DynamoDBClient {
         Ok(None)
     }
 
-    pub async fn update_last_notified_track_id(
-        &self,
-        new_track_id: &str,
-    ) -> Result<(), OpaqueError> {
+    async fn update_last_notified_track_id(&self, new_track_id: &str) -> Result<(), OpaqueError> {
         let request = self
             .client
             .update_item()
@@ -99,7 +111,7 @@ impl DynamoDBClient {
         Ok(())
     }
 
-    pub async fn extract_spotify_refresh_token(&self) -> Result<Option<String>, OpaqueError> {
+    async fn extract_spotify_refresh_token(&self) -> Result<Option<String>, OpaqueError> {
         let request = self
             .client
             .get_item()
@@ -121,7 +133,7 @@ impl DynamoDBClient {
         Ok(None)
     }
 
-    pub async fn update_spotify_refresh_token(
+    async fn update_spotify_refresh_token(
         &self,
         new_refresh_token: &str,
     ) -> Result<(), OpaqueError> {

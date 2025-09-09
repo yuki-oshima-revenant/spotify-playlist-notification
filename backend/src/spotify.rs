@@ -1,5 +1,6 @@
 use std::{collections::HashMap, env};
 
+use mockall::automock;
 use reqwest::header::{CONTENT_TYPE, HeaderMap};
 use serde::Deserialize;
 
@@ -33,20 +34,20 @@ pub struct SpotifyPlaylistResponse {
 #[derive(Deserialize, Debug)]
 pub struct SpotifyTrack {
     pub id: String,
-    name: String,
+    pub name: String,
     pub external_urls: SpotifyExternalUrls,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct SpotifyPlaylistItem {
-    added_at: String,
+    pub added_at: String,
     pub added_by: SpotifyUser,
     pub track: SpotifyTrack,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct SpotifyPlaylistTracksResponse {
-    next: Option<String>,
+    pub next: Option<String>,
     pub items: Vec<SpotifyPlaylistItem>,
 }
 
@@ -58,17 +59,36 @@ impl SpotifyPlaylistTracksResponse {
     pub fn get_not_notified_tracks(
         &self,
         last_notified_track_id: &str,
-    ) -> Vec<&SpotifyPlaylistItem> {
+    ) -> Option<Vec<&SpotifyPlaylistItem>> {
+        let mut found = false;
         let mut not_notified_tracks = Vec::new();
         for item in self.items.iter().rev() {
             if item.track.id == last_notified_track_id {
+                found = true;
                 break;
             }
             not_notified_tracks.push(item);
         }
+        // last_notified_track_idに該当するトラックが見つからなかった場合に全件通知されるのを防ぐ
+        if !found {
+            return None;
+        }
         not_notified_tracks.reverse();
-        not_notified_tracks
+        Some(not_notified_tracks)
     }
+}
+
+#[automock]
+pub trait SpotifyClientTrait {
+    async fn get_spotify_playlist(
+        &self,
+        playlist_id: &str,
+    ) -> Result<SpotifyPlaylistResponse, OpaqueError>;
+    async fn list_all_spotify_playlist_tracks(
+        &self,
+        playlist_id: &str,
+    ) -> Result<SpotifyPlaylistTracksResponse, OpaqueError>;
+    fn get_next_spotify_refresh_token(&self) -> &Option<String>;
 }
 
 pub struct SpotifyClient {
@@ -104,22 +124,7 @@ impl SpotifyClient {
         Ok(Self { token_response })
     }
 
-    pub async fn get_spotify_playlist(
-        &self,
-        playlist_id: &str,
-    ) -> Result<SpotifyPlaylistResponse, OpaqueError> {
-        let client = reqwest::Client::new();
-        let url = format!("https://api.spotify.com/v1/playlists/{playlist_id}");
-        let res = client
-            .get(url)
-            .bearer_auth(&self.get_access_token())
-            .send()
-            .await?;
-        let res_body: SpotifyPlaylistResponse = res.json().await?;
-        Ok(res_body)
-    }
-
-    pub async fn get_spotify_playlist_tracks(
+    async fn get_spotify_playlist_tracks(
         &self,
         playlist_id: &str,
         url: Option<String>,
@@ -139,7 +144,28 @@ impl SpotifyClient {
         Ok(res_body)
     }
 
-    pub async fn list_all_spotify_playlist_tracks(
+    fn get_access_token(&self) -> &str {
+        &self.token_response.access_token
+    }
+}
+
+impl SpotifyClientTrait for SpotifyClient {
+    async fn get_spotify_playlist(
+        &self,
+        playlist_id: &str,
+    ) -> Result<SpotifyPlaylistResponse, OpaqueError> {
+        let client = reqwest::Client::new();
+        let url = format!("https://api.spotify.com/v1/playlists/{playlist_id}");
+        let res = client
+            .get(url)
+            .bearer_auth(&self.get_access_token())
+            .send()
+            .await?;
+        let res_body: SpotifyPlaylistResponse = res.json().await?;
+        Ok(res_body)
+    }
+
+    async fn list_all_spotify_playlist_tracks(
         &self,
         playlist_id: &str,
     ) -> Result<SpotifyPlaylistTracksResponse, OpaqueError> {
@@ -161,18 +187,14 @@ impl SpotifyClient {
         })
     }
 
-    fn get_access_token(&self) -> &str {
-        &self.token_response.access_token
-    }
-
-    pub fn get_next_spotify_refresh_token(&self) -> &Option<String> {
+    fn get_next_spotify_refresh_token(&self) -> &Option<String> {
         &self.token_response.refresh_token
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::dynamodb::DynamoDBClient;
+    use crate::dynamodb::{DynamoDBClient, DynamoDBClientTrait};
 
     use super::*;
 
@@ -207,5 +229,24 @@ mod tests {
             .await
             .unwrap();
         println!("{:?}", res);
+    }
+
+    #[tokio::test]
+    async fn test_get_not_notified_tracks_not_found() {
+        dotenvy::dotenv().ok();
+        let playlist_id = env::var("SPOTIFY_PLAYLIST_ID").unwrap();
+        let dynamodb_client = DynamoDBClient::new().await;
+        let spotify_refresh_token = dynamodb_client
+            .extract_spotify_refresh_token()
+            .await
+            .unwrap()
+            .unwrap();
+        let client = SpotifyClient::init(&spotify_refresh_token).await.unwrap();
+        let res = client
+            .list_all_spotify_playlist_tracks(&playlist_id)
+            .await
+            .unwrap();
+        let not_notified_tracks = res.get_not_notified_tracks("non_existent_track_id");
+        assert!(not_notified_tracks.is_none());
     }
 }
