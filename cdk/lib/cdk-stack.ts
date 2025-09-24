@@ -86,7 +86,7 @@ export class CdkStack extends Stack {
         new aws_scheduler.Schedule(this, "Schedule", {
             schedule: aws_scheduler.ScheduleExpression.cron({
                 minute: "0",
-                hour: "0,12",
+                hour: "12",
                 day: "*",
                 month: "*",
                 year: "*",
